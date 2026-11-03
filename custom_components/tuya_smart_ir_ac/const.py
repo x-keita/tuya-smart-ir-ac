@@ -77,6 +77,7 @@ CONF_FAN_POWER_ON = "fan_power_on"
 CONF_DRY_MIN_TEMP = "dry_min_temp"
 CONF_DRY_MIN_FAN = "dry_min_fan"
 CONF_CUSTOM_POWER_ON = "custom_power_on"
+CONF_SINGLE_COMMAND = "single_command"
 CONF_SENSOR_TYPES = "sensor_types"
 CONF_TEMP_UNIT = "temp_unit"
 
@@ -98,6 +99,7 @@ DEFAULT_TEMP_POWER_ON = POWER_ON_NEVER
 DEFAULT_FAN_POWER_ON = POWER_ON_NEVER
 DEFAULT_DRY_MIN_TEMP = False
 DEFAULT_DRY_MIN_FAN = False
+DEFAULT_SINGLE_COMMAND = False
 DEFAULT_ENABLE_PULSAR = False
 
 # Climate default fallbacks
