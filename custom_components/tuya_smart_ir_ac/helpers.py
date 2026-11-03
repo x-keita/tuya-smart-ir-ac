@@ -35,8 +35,9 @@ def convert_to_float(value: Any) -> float | None:
 def tuya_temp(temp: Any) -> str | None:
     """Safely convert temperature to Tuya string protocol format."""
     float_val = convert_to_float(temp)
-    return str(float_val) if float_val is not None else None
-
+    if float_val is None:
+        return None
+    return str(int(float_val)) if float_val.is_integer() else str(float_val)
 
 def tuya_mode(hvac_mode: str) -> str | None:
     """Reverse map Home Assistant HVAC mode to Tuya protocol mode."""
