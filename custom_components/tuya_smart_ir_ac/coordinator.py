@@ -51,7 +51,7 @@ class TuyaClimateCoordinator(DataUpdateCoordinator[dict[str, TuyaClimateData]]):
         """Check if the climate device is available in the fetched data."""
         return self.data and self.data.get(climate_id) is not None
     
-    # =========================================================================
+# =========================================================================
     # PUBLIC ATOMIC COORDINATOR ACTIONS
     # =========================================================================
 
@@ -80,6 +80,32 @@ class TuyaClimateCoordinator(DataUpdateCoordinator[dict[str, TuyaClimateData]]):
         await self._send_combined_command(infrared_id, climate_id, hvac_mode, temperature, fan_mode)
         await self._async_force_update_data(climate_id, power=True, hvac_mode=hvac_mode, temperature=temperature, fan_mode=fan_mode)
 
+    async def async_set_hvac_mode_single(
+        self,
+        infrared_id: str,
+        climate_id: str,
+        hvac_mode: HVACMode,
+        temperature: float | None = None,
+        fan_mode: str | None = None,
+        send_temp: bool = False,
+        send_fan: bool = False,
+    ):
+        """Send individual IR commands sequentially (Mode, and optionally Temp/Fan) and update local cache."""
+        await self._send_mode_command(infrared_id, climate_id, hvac_mode)
+        if send_temp and temperature is not None and hvac_mode != HVACMode.FAN_ONLY:
+            await asyncio.sleep(0.2)
+            await self._send_temperature_command(infrared_id, climate_id, temperature)
+        if send_fan and fan_mode is not None:
+            await asyncio.sleep(0.2)
+            await self._send_fan_mode_command(infrared_id, climate_id, fan_mode)
+        await self._async_force_update_data(
+            climate_id,
+            power=True,
+            hvac_mode=hvac_mode,
+            temperature=temperature,
+            fan_mode=fan_mode,
+        )
+
     # =========================================================================
     # PUBLIC COMBINED ATOMIC FLOWS
     # =========================================================================
@@ -90,15 +116,40 @@ class TuyaClimateCoordinator(DataUpdateCoordinator[dict[str, TuyaClimateData]]):
         await self._send_combined_command(infrared_id, climate_id, hvac_mode, temperature, fan_mode)
         await self._async_force_update_data(climate_id, power=True, hvac_mode=hvac_mode, temperature=temperature, fan_mode=fan_mode)
 
+    async def async_turn_on_with_hvac_mode_single(
+        self,
+        infrared_id: str,
+        climate_id: str,
+        hvac_mode: HVACMode,
+        temperature: float | None = None,
+        fan_mode: str | None = None,
+        send_temp: bool = False,
+        send_fan: bool = False,
+    ):
+        """Turn on the device via single command and sequentially send individual HVAC commands."""
+        await self._send_power_command(infrared_id, climate_id, "1")
+        await asyncio.sleep(0.2)
+        await self.async_set_hvac_mode_single(
+            infrared_id,
+            climate_id,
+            hvac_mode,
+            temperature=temperature,
+            fan_mode=fan_mode,
+            send_temp=send_temp,
+            send_fan=send_fan,
+        )
+
     async def async_turn_on_with_temperature(self, infrared_id: str, climate_id: str, temperature: float):
         """Execute a combined flow: turn on the device via cloud and immediately set temperature, updating cache once."""
         await self._send_power_command(infrared_id, climate_id, "1")
+        await asyncio.sleep(0.2)
         await self._send_temperature_command(infrared_id, climate_id, temperature)
         await self._async_force_update_data(climate_id, power=True, temperature=temperature)
 
     async def async_turn_on_with_fan_mode(self, infrared_id: str, climate_id: str, fan_mode: str):
         """Execute a combined flow: turn on the device via cloud and immediately set fan mode, updating cache once."""
         await self._send_power_command(infrared_id, climate_id, "1")
+        await asyncio.sleep(0.2)
         await self._send_fan_mode_command(infrared_id, climate_id, fan_mode)
         await self._async_force_update_data(climate_id, power=True, fan_mode=fan_mode)
 
@@ -114,6 +165,14 @@ class TuyaClimateCoordinator(DataUpdateCoordinator[dict[str, TuyaClimateData]]):
             _LOGGER.error("Failed to turn %s climate %s: %s", "on" if state == "1" else "off", climate_id, result.error_info)
             translation_key = "climate_error_turn_on" if state == "1" else "climate_error_turn_off"
             raise ServiceValidationError(translation_domain=DOMAIN, translation_key=translation_key)
+
+    async def _send_mode_command(self, infrared_id: str, climate_id: str, hvac_mode: HVACMode) -> None:
+        """Send raw HVAC mode single command and handle validation errors."""
+        _LOGGER.debug("[%s] Sending single IR command to set HVAC mode to %s", climate_id, hvac_mode)
+        result = await self._api.async_send_command(infrared_id, climate_id, "mode", tuya_mode(hvac_mode))
+        if not result.success:
+            _LOGGER.error("Failed to set HVAC mode for climate %s: %s", climate_id, result.error_info)
+            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="climate_error_hvac_mode")
 
     async def _send_temperature_command(self, infrared_id: str, climate_id: str, temperature: float) -> None:
         """Send raw temperature command and handle validation errors."""
