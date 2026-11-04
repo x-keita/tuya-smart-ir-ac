@@ -55,6 +55,7 @@ from .const import (
     CONF_PRESET_MODES,
     CONF_SENSOR_TYPES,
     CONF_SENSOR_UPDATE_INTERVAL,
+    CONF_SINGLE_COMMAND,
     CONF_TEMPERATURE_SENSOR,
     CONF_TEMP_MAX,
     CONF_TEMP_MIN,
@@ -72,6 +73,7 @@ from .const import (
     DEFAULT_MAX_TEMP,
     DEFAULT_MIN_TEMP,
     DEFAULT_PRECISION,
+    DEFAULT_SINGLE_COMMAND,
     DEFAULT_TEMPERATURE,
     DEFAULT_TEMP_POWER_ON,
     DEVICE_TYPE_CLIMATES,
@@ -938,6 +940,9 @@ def climate_data() -> dict[vol.Marker, Any]:
                     ): BooleanSelector(),
                     vol.Optional(
                         CONF_DRY_MIN_FAN, default=DEFAULT_DRY_MIN_FAN
+                    ): BooleanSelector(),
+                    vol.Optional(
+                        CONF_SINGLE_COMMAND, default=DEFAULT_SINGLE_COMMAND
                     ): BooleanSelector(),
                     vol.Optional(CONF_CUSTOM_POWER_ON): EntitySelector(
                         EntitySelectorConfig(
