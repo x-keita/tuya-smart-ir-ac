@@ -105,6 +105,7 @@ class TuyaClimateEntity:
         self._dry_min_temp = compatibility.get(CONF_DRY_MIN_TEMP, DEFAULT_DRY_MIN_TEMP)
         self._dry_min_fan = compatibility.get(CONF_DRY_MIN_FAN, DEFAULT_DRY_MIN_FAN)
         self._custom_power_on = compatibility.get(CONF_CUSTOM_POWER_ON)
+        self._single_command = compatibility.get(CONF_SINGLE_COMMAND, DEFAULT_SINGLE_COMMAND)
 
         base_id = f"{self._infrared_id}_{self._climate_id}"
         self._attr_unique_id = f"{base_id}_{sub_entity_type}" if sub_entity_type else base_id
@@ -312,12 +313,18 @@ class TuyaClimateEntity:
 
     async def async_handle_turn_on(self) -> None:
         """Turn on the climate device power via coordinator service."""
+        if self._single_command:
+            if self._custom_power_on:
+                await self._async_trigger_custom_power_on()
+                await self.coordinator._async_force_update_data(self._climate_id, power=True)
+            else:
+                await self.coordinator.async_turn_on(self._infrared_id, self._climate_id)
+            return
 
         if self._custom_power_on:
             force_power_on = True
         else:
             force_power_on = self.get_hvac_power_on(self._current_hvac_mode)
-
         await self._async_dispatch_command(
             self._real_hvac_mode, 
             self._current_target_temperature, 
@@ -334,10 +341,37 @@ class TuyaClimateEntity:
         if hvac_mode is HVACMode.OFF:
             await self.coordinator.async_turn_off(self._infrared_id, self._climate_id)
             return
-
         temperature = self.get_hvac_temperature(hvac_mode)
         fan_mode = self.get_hvac_fan_mode(hvac_mode)
         force_power_on = self.get_hvac_power_on(self._current_hvac_mode)
+
+        if self._single_command:
+            send_temp = self._preset_temp_hvac_mode or (hvac_mode is HVACMode.DRY and self._dry_min_temp)
+            send_fan = self._preset_fan_hvac_mode or (hvac_mode is HVACMode.DRY and self._dry_min_fan)
+            if force_power_on:
+                if self._custom_power_on:
+                    await self._async_trigger_custom_power_on()
+                else:
+                    await self.coordinator.async_turn_on_with_hvac_mode_single(
+                        self._infrared_id,
+                        self._climate_id,
+                        hvac_mode,
+                        temperature=temperature,
+                        fan_mode=fan_mode,
+                        send_temp=send_temp,
+                        send_fan=send_fan,
+                    )
+                    return
+            await self.coordinator.async_set_hvac_mode_single(
+                self._infrared_id,
+                self._climate_id,
+                hvac_mode,
+                temperature=temperature,
+                fan_mode=fan_mode,
+                send_temp=send_temp,
+                send_fan=send_fan,
+            )
+            return
 
         await self._async_dispatch_command(hvac_mode, temperature, fan_mode, force_power_on)
 
@@ -346,17 +380,68 @@ class TuyaClimateEntity:
         if hvac_mode is HVACMode.OFF:
             await self.async_handle_turn_off()
             return
-
         target_hvac_mode = hvac_mode if hvac_mode is not None else self._real_hvac_mode
         target_fan_mode = self.get_hvac_fan_mode(target_hvac_mode)
         force_power_on = self.get_temp_power_on(self._current_hvac_mode)
+
+        if self._single_command:
+            mode_changed = hvac_mode is not None and hvac_mode != self._real_hvac_mode
+            if force_power_on:
+                if self._custom_power_on:
+                    await self._async_trigger_custom_power_on()
+                elif mode_changed:
+                    await self.coordinator.async_turn_on_with_hvac_mode_single(
+                        self._infrared_id,
+                        self._climate_id,
+                        target_hvac_mode,
+                        temperature=value,
+                        fan_mode=target_fan_mode,
+                        send_temp=True,
+                        send_fan=False,
+                    )
+                    return
+                else:
+                    await self.coordinator.async_turn_on_with_temperature(
+                        self._infrared_id, self._climate_id, value
+                    )
+                    return
+
+            if mode_changed:
+                await self.coordinator.async_set_hvac_mode_single(
+                    self._infrared_id,
+                    self._climate_id,
+                    target_hvac_mode,
+                    temperature=value,
+                    fan_mode=target_fan_mode,
+                    send_temp=True,
+                    send_fan=False,
+                )
+            else:
+                await self.coordinator.async_set_temperature(
+                    self._infrared_id, self._climate_id, value
+                )
+            return
 
         await self._async_dispatch_command(target_hvac_mode, value, target_fan_mode, force_power_on)
 
     async def async_handle_set_fan_mode(self, fan_mode: str) -> None:
         """Set fan mode for the climate device via coordinator service."""
         force_power_on = self.get_fan_power_on(self._current_hvac_mode)
-        
+
+        if self._single_command:
+            if force_power_on:
+                if self._custom_power_on:
+                    await self._async_trigger_custom_power_on()
+                else:
+                    await self.coordinator.async_turn_on_with_fan_mode(
+                        self._infrared_id, self._climate_id, fan_mode
+                    )
+                    return
+            await self.coordinator.async_set_fan_mode(
+                self._infrared_id, self._climate_id, fan_mode
+            )
+            return
+
         await self._async_dispatch_command(
             self._real_hvac_mode, 
             self._current_target_temperature, 
@@ -368,52 +453,43 @@ class TuyaClimateEntity:
         """Set preset mode for the climate device."""
         if preset_mode == PRESET_NONE or not (preset_config := self._runtime_data.global_presets.get(preset_mode)):
             return
-
         target_mode = self._real_hvac_mode
         if self._last_valid_preset_hvac_mode and self._current_hvac_mode is HVACMode.OFF:
             target_mode = self._last_valid_preset_hvac_mode
-
         if target_mode not in preset_config:
             return
-
         mode_config = preset_config.get(target_mode)
         target_temp = mode_config.get("temp")
         target_fan = mode_config.get("fan")
         force_power_on = self.get_hvac_power_on(self._current_hvac_mode)
 
+        if self._single_command:
+            if force_power_on:
+                if self._custom_power_on:
+                    await self._async_trigger_custom_power_on()
+                else:
+                    await self.coordinator.async_turn_on_with_hvac_mode_single(
+                        self._infrared_id,
+                        self._climate_id,
+                        target_mode,
+                        temperature=target_temp,
+                        fan_mode=target_fan,
+                        send_temp=True,
+                        send_fan=True,
+                    )
+                    return
+            await self.coordinator.async_set_hvac_mode_single(
+                self._infrared_id,
+                self._climate_id,
+                target_mode,
+                temperature=target_temp,
+                fan_mode=target_fan,
+                send_temp=True,
+                send_fan=True,
+            )
+            return
+
         await self._async_dispatch_command(target_mode, target_temp, target_fan, force_power_on)
-
-    async def _async_dispatch_command(
-        self, 
-        target_mode: HVACMode, 
-        target_temp: float, 
-        target_fan: str, 
-        force_power_on: bool
-    ) -> None:
-        """Centralize the dispatch logic."""
-        if force_power_on:
-            if self._custom_power_on:
-                await self._async_trigger_custom_power_on()
-            else:
-                await self.coordinator.async_turn_on_with_hvac_mode(
-                    self._infrared_id, self._climate_id, target_mode, target_temp, target_fan
-                )
-                return
-
-        await self.coordinator.async_set_hvac_mode(
-            self._infrared_id, self._climate_id, target_mode, target_temp, target_fan
-        )
-
-    async def _async_trigger_custom_power_on(self) -> None:
-        """Trigger the custom hardware alternative power-on button."""
-        _LOGGER.debug("Triggering custom power-on button: %s", self._custom_power_on)
-        await self.hass.services.async_call(
-            domain=Platform.BUTTON,
-            service="press",
-            service_data={"entity_id": self._custom_power_on},
-            blocking=True
-        )
-
 
 class TuyaSensorEntity:
     """Base class for standalone environmental Temperature/Humidity sensor devices managed by this integration."""
