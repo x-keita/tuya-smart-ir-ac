@@ -212,6 +212,7 @@
               "fan_power_on": "Force power on when setting fan speed",
               "dry_min_temp": "Set minimum temperature in dry mode",
               "dry_min_fan": "Set minimum fan speed in dry mode",
+              "single_command": "Send single IR commands instead of combined mode (fixes Code 30002)",
               "custom_power_on": "Custom power-on button (ONLY if standard power-on fails)"
             }
           }
